@@ -2,6 +2,16 @@ from typing import Optional
 from sqlmodel import SQLModel, Field
 
 
+class MoviePublic(SQLModel):
+    id: int
+    title: str
+    vote_average: float | None = None
+    release_date: str | None = None
+    overview: str | None = None
+    poster_path: str | None = None
+    genres: list[str] | None = None
+
+
 class Movie(SQLModel, table=True):
     """
     Movie table reflecting the CSV columns.
@@ -37,3 +47,23 @@ class Movie(SQLModel, table=True):
     spoken_languages: Optional[str] = None
     # keywords: CSV comment asked to split by ", " -> store JSON list
     keywords: Optional[str] = None
+
+    def to_public(self) -> MoviePublic:
+        genres_list = (
+            [
+                g.strip().strip('"').strip("'")
+                for g in self.genres.strip("[").strip("]").split(", ")
+                if g.strip()
+            ]
+            if self.genres
+            else []
+        )
+        return MoviePublic(
+            id=self.id,
+            title=self.title,
+            vote_average=self.vote_average,
+            release_date=self.release_date,
+            overview=self.overview,
+            poster_path=self.poster_path,
+            genres=genres_list,
+        )

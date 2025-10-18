@@ -1,17 +1,17 @@
 from fastapi import APIRouter, Query
 from sqlmodel import select, or_
 from app.dependencies.db import SessionDep
-from app.models.movie import Movie
+from app.models.movie import Movie, MoviePublic
 
 
 router = APIRouter()
 
 
-@router.get("/", response_model=list[Movie])
+@router.get("/")
 def get_movies(
     session: SessionDep,
     search: str | None = Query(None, description="Search term for title or keywords"),
-) -> list[Movie]:
+) -> list[MoviePublic]:
     if not search:
         return []
 
@@ -27,5 +27,5 @@ def get_movies(
         .limit(50)
     )
 
-    results = session.exec(stmt).all()
-    return results
+    results: list[Movie] = session.exec(stmt).all()
+    return [m.to_public() for m in results]
