@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes import router as api_router
+from app.tasks.on_startup_create_recommender import on_startup_create_recommender
 from app.tasks.on_startup_populate_db import on_startup_populate_db
 
 app = FastAPI(title="CineMatch API")
@@ -19,7 +20,8 @@ app.add_middleware(
 
 
 def startup():
-    on_startup_populate_db()
+    engine = on_startup_populate_db()
+    app.state.recommender = on_startup_create_recommender(engine)
 
 
 app.add_event_handler("startup", startup)

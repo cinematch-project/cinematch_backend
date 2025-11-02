@@ -1,9 +1,17 @@
 from typing import Optional
 from sqlmodel import SQLModel, Field
+from pydantic import BaseModel
+
+
+class RecommendMoviesRequest(BaseModel):
+    ids: list[int]
+    top_n: int | None = 10
+    similarity_weight: float | None = 0.7
 
 
 class MoviePublic(SQLModel):
     id: int
+    tmdb_id: int
     title: str
     vote_average: float | None = None
     release_date: str | None = None
@@ -60,6 +68,7 @@ class Movie(SQLModel, table=True):
         )
         return MoviePublic(
             id=self.id,
+            tmdb_id=self.tmdb_id,
             title=self.title,
             vote_average=self.vote_average,
             release_date=self.release_date,

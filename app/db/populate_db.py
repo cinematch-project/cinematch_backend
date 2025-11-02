@@ -14,6 +14,7 @@ def populate_from_csv(engine, csv_path: str):
         raise FileNotFoundError(f"CSV file not found at: {csv_path}")
 
     BATCH_SIZE = 500
+    ids = set()
     current_batch = 0
     movies_batch = []
 
@@ -21,8 +22,11 @@ def populate_from_csv(engine, csv_path: str):
         reader = csv.DictReader(fh)
         for row_idx, row in enumerate(reader, start=1):
             try:
+                tmdb_id = parse_int(row.get("id"))
+                if tmdb_id in ids:
+                    continue
                 m = Movie(
-                    tmdb_id=parse_int(row.get("id")),
+                    tmdb_id=tmdb_id,
                     title=row.get("title") or None,
                     vote_average=parse_float(row.get("vote_average")),
                     vote_count=parse_int(row.get("vote_count")),
@@ -51,6 +55,7 @@ def populate_from_csv(engine, csv_path: str):
                     spoken_languages=parse_list_field(row.get("spoken_languages")),
                     keywords=parse_list_field(row.get("keywords")),
                 )
+                ids.add(tmdb_id)
             except Exception as e:
                 # Skip bad rows but log them (here we simply print)
                 print(f"Error parsing row {row_idx}: {e}. Row data: {row}")
@@ -64,7 +69,8 @@ def populate_from_csv(engine, csv_path: str):
                     session.commit()
                 movies_batch = []
                 current_batch += 1
-                print(f"Populated batch: {current_batch}")
+                if current_batch % 100 == 0:
+                    print(f"Populated batch: {current_batch}")
 
     # insert remaining
     if movies_batch:

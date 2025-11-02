@@ -85,3 +85,5 @@ def on_startup_populate_db(db_file: str = DB_FILE, csv_file: str = CSV_FILE):
             session.add(dbv)
             session.commit()
             print(f"Set DB version to {TARGET_DB_VERSION}.")
+
+    return engine
