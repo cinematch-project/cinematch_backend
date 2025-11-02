@@ -3,11 +3,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routes import router as api_router
 from app.tasks.on_startup_create_recommender import on_startup_create_recommender
 from app.tasks.on_startup_populate_db import on_startup_populate_db
+from app.core.config import settings
 
 app = FastAPI(title="CineMatch API")
 
 origins = [
-    "http://localhost:3000",
+    settings.frontend_origin,
 ]
 
 app.add_middleware(
