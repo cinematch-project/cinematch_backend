@@ -8,8 +8,9 @@ from sqlmodel import SQLModel, Session, select
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 TARGET_DB_VERSION = 1
-DB_FILE = BASE_DIR / "data" / "movies.db"
-CSV_FILE = BASE_DIR / "data" / "TMDB_movie_dataset_v11.csv"
+DATA_DIR = BASE_DIR / "data"
+DB_FILE = DATA_DIR / "movies.db"
+CSV_FILE = DATA_DIR / "TMDB_movie_dataset_v11.csv"
 
 
 def on_startup_populate_db(db_file: str = DB_FILE, csv_file: str = CSV_FILE):
@@ -23,6 +24,9 @@ def on_startup_populate_db(db_file: str = DB_FILE, csv_file: str = CSV_FILE):
     engine = get_engine()
 
     db_needs_setup = False
+
+    if not DATA_DIR.exists():
+        DATA_DIR.mkdir(parents=True)
 
     # 1) If DB file doesn't exist -> must setup
     if not Path(db_file).exists():
