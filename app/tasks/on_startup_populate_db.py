@@ -4,13 +4,26 @@ from app.db.populate_db import populate_from_csv
 from app.models.db_version import DBVersion
 from datetime import datetime
 from sqlmodel import SQLModel, Session, select
+import kagglehub
+import os
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 TARGET_DB_VERSION = 1
 DATA_DIR = BASE_DIR / "data"
 DB_FILE = DATA_DIR / "movies.db"
-CSV_FILE = DATA_DIR / "TMDB_movie_dataset_v11.csv"
+DATASET_NAME = "TMDB_movie_dataset_v11.csv"
+CSV_FILE = DATA_DIR / DATASET_NAME
+
+
+def get_csv(csv_file: str):
+    if Path(csv_file).exists():
+        return csv_file
+    print(f"Downloading {DATASET_NAME} from Kaggle...")
+    path = kagglehub.dataset_download("asaniczka/tmdb-movies-dataset-2023-930k-movies")
+    print(f"Downloaded to {path}")
+    os.replace(os.path.join(path, DATASET_NAME), csv_file)
+    return csv_file
 
 
 def on_startup_populate_db(db_file: str = DB_FILE, csv_file: str = CSV_FILE):
@@ -76,8 +89,9 @@ def on_startup_populate_db(db_file: str = DB_FILE, csv_file: str = CSV_FILE):
 
         # Populate from CSV
         try:
-            print("Populating Movie table from CSV:", csv_file)
-            populate_from_csv(engine, csv_file)
+            csv = get_csv(csv_file)
+            print("Populating Movie table from CSV:", csv)
+            populate_from_csv(engine, csv)
             print("Population finished.")
         except Exception as e:
             print("Error populating DB from CSV:", e)
