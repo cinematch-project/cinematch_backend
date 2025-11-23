@@ -91,7 +91,8 @@ def on_startup_populate_db(db_file: str = DB_FILE, csv_file: str = CSV_FILE):
         try:
             csv = get_csv(csv_file)
             print("Populating Movie table from CSV:", csv)
-            populate_from_csv(engine, csv)
+            with Session(engine) as session:
+                populate_from_csv(session, csv)
             print("Population finished.")
         except Exception as e:
             print("Error populating DB from CSV:", e)

@@ -1,4 +1,4 @@
-import json
+import ast
 
 
 def parse_bool(val: str):
@@ -37,34 +37,27 @@ def parse_float(val: str):
         return None
 
 
-def parse_list_field(val: str):
+def parse_list_field(value: str | None) -> list[str]:
     """
-    Convert a CSV field that represents a list into a python list.
-    We will not try to parse complicated JSON-like strings — keep simple:
-    - If empty -> []
-    - If value contains ', ' -> split on ', '
-    - Else if value contains ',' -> split on ',' (strip)
-    - Else -> return [val] if not empty
-    Return JSON string (to store in Movie.<field>).
+    Normalize genres, keywords, companies, etc.
+    Accepts values like:
+        "['Action','Drama']"
+        "Action, Drama"
+        "Action"
     """
-    if val is None:
-        return None
-    v = val.strip()
-    if v == "":
-        return json.dumps([])
-    # If already appears as a JSON array (starts with [), try to parse it
-    if v.startswith("[") and v.endswith("]"):
+    if not value:
+        return []
+
+    value = value.strip()
+
+    # Try Python literal parsing first
+    if value.startswith("[") and value.endswith("]"):
         try:
-            parsed = json.loads(v)
-            return json.dumps(parsed)
+            parsed = ast.literal_eval(value)
+            if isinstance(parsed, list):
+                return [str(x).strip() for x in parsed if str(x).strip()]
         except Exception:
             pass
-    # split heuristics
-    if ", " in v:
-        items = [p.strip() for p in v.split(", ") if p.strip() != ""]
-        return json.dumps(items)
-    if "," in v:
-        items = [p.strip() for p in v.split(",") if p.strip() != ""]
-        return json.dumps(items)
-    # single value
-    return json.dumps([v]) if v != "" else json.dumps([])
+
+    # Fallback: comma-separated
+    return [v.strip() for v in value.split(",") if v.strip()]
