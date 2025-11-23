@@ -22,6 +22,7 @@ from app.models.movie import (
 from fastapi.concurrency import run_in_threadpool
 
 PER_PAGE = 25
+TOTAL_COUNT = 915684
 
 router = APIRouter()
 
@@ -105,11 +106,7 @@ def get_movies(
 
     offset = (page - 1) * PER_PAGE
     stmt = stmt.offset(offset).limit(PER_PAGE)
-
-    total = session.exec(stmt.with_only_columns(Movie.id).order_by(None)).all()
-
-    total_count = len(total)
-    total_pages = (total_count + PER_PAGE - 1) // PER_PAGE
+    total_pages = (TOTAL_COUNT + PER_PAGE - 1) // PER_PAGE
 
     results: list[Movie] = session.exec(stmt).all()
     return MovieSearchResponse(items=results, totalPages=total_pages)
@@ -136,12 +133,13 @@ def get_movies_batch(
     for _id in ids:
         movie = by_id.get(_id)
         if movie:
-            response.append(movie.to_public())
+            response.append(movie)
     return response
 
 
 @router.post("/recommend")
 async def recommend_by_ids(
+    session: SessionDep,
     recommender: RecommenderDep,
     body: RecommendMoviesRequest,
 ) -> list[MoviePublic]:
@@ -153,53 +151,9 @@ async def recommend_by_ids(
         recommender.recommend, body.ids, body.top_n, body.similarity_weight
     )
 
-    # map DataFrame rows to MoviePublic (parse genres as needed)
-    results = []
-    for _, row in df_recs.iterrows():
-        genres = []
-        val = row.get("genres")
-        if isinstance(val, str):
-            import ast
+    ids = [int(row["id"]) for _, row in df_recs.iterrows()]
 
-            try:
-                parsed = ast.literal_eval(val)
-                if isinstance(parsed, (list, tuple)):
-                    genres = [str(g).strip().strip('"').strip("'") for g in parsed if g]
-                else:
-                    genres = [
-                        s.strip().strip('"').strip("'")
-                        for s in str(val).split(",")
-                        if s.strip()
-                    ]
-            except Exception:
-                genres = [
-                    s.strip().strip('"').strip("'")
-                    for s in str(val).split(",")
-                    if s.strip()
-                ]
-        elif isinstance(val, list):
-            genres = val
-
-        results.append(
-            MoviePublic(
-                id=int(row.get("id")),
-                tmdb_id=int(row.get("tmdb_id")),
-                title=row.get("title"),
-                vote_average=(
-                    float(row.get("vote_average"))
-                    if row.get("vote_average") is not None
-                    else None
-                ),
-                release_date=row.get("release_date"),
-                overview=row.get("overview"),
-                poster_path=(
-                    row.get("poster_path") if "poster_path" in row.index else None
-                ),
-                genres=genres,
-            )
-        )
-
-    return results
+    return get_movies_batch(session, ids)
 
 
 @router.get("/filters", response_model=FilterResponse)
