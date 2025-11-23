@@ -19,8 +19,24 @@ class MoviePublic(SQLModel):
     production_companies: list[ProductionCompany]
     production_countries: list[ProductionCountry]
     keywords: list[Keyword]
+    original_title: str | None = None
     vote_average: float | None = None
     release_date: date | None = None
     overview: str | None = None
     poster_path: str | None = None
     runtime: int | None = None
+
+
+class MovieSearchResponse(BaseModel):
+    items: list[MoviePublic]
+    totalPages: int
+
+
+class FilterItem(BaseModel):
+    id: int
+    name: str
+
+
+class FilterResponse(BaseModel):
+    genres: list[FilterItem]
+    countries: list[FilterItem]

@@ -1,4 +1,5 @@
 import ast
+import re
 
 
 def parse_bool(val: str):
@@ -61,3 +62,64 @@ def parse_list_field(value: str | None) -> list[str]:
 
     # Fallback: comma-separated
     return [v.strip() for v in value.split(",") if v.strip()]
+
+
+def custom_slugify(s):
+    s = s.lower().strip()
+    s = re.sub(r"[^\w\s-]", "", s)  # Remove non-word chars (except spaces and hyphens)
+    s = re.sub(
+        r"[\s_-]+", "-", s
+    )  # Replace spaces, underscores, and multiple hyphens with single hyphens
+    s = re.sub(r"^-+|-+$", "", s)  # Remove leading/trailing hyphens
+    return s
+
+
+def get_sql_statement():
+    return """
+    SELECT
+        m.id,
+        m.tmdb_id,
+        m.title,
+        m.original_title,
+        m.overview,
+        m.release_date,
+        m.runtime,
+        m.vote_average,
+        m.vote_count,
+        m.popularity,
+        m.poster_path,
+
+        -- aggregated genres
+        (
+            SELECT GROUP_CONCAT(g.name, ', ')
+            FROM genre g
+            JOIN moviegenrelink l ON l.genre_id = g.id
+            WHERE l.movie_id = m.id
+        ) AS genres,
+
+        -- aggregated keywords
+        (
+            SELECT GROUP_CONCAT(k.name, ', ')
+            FROM keyword k
+            JOIN moviekeywordlink l ON l.keyword_id = k.id
+            WHERE l.movie_id = m.id
+        ) AS keywords,
+
+        -- aggregated production companies
+        (
+            SELECT GROUP_CONCAT(pc.name, ', ')
+            FROM production_company pc
+            JOIN movieproductioncompanylink l ON l.production_company_id = pc.id
+            WHERE l.movie_id = m.id
+        ) AS production_companies,
+
+        -- aggregated countries
+        (
+            SELECT GROUP_CONCAT(pc.name, ', ')
+            FROM production_country pc
+            JOIN movieproductioncountrylink l ON l.production_country_id = pc.id
+            WHERE l.movie_id = m.id
+        ) AS production_countries
+
+    FROM movie m
+    """

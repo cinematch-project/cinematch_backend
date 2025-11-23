@@ -16,14 +16,14 @@ class MovieGenreLink(SQLModel, table=True):
 class MovieProductionCompanyLink(SQLModel, table=True):
     movie_id: int | None = Field(default=None, foreign_key="movie.id", primary_key=True)
     production_company_id: int | None = Field(
-        default=None, foreign_key="production_company.id", primary_key=True
+        default=None, foreign_key="productioncompany.id", primary_key=True
     )
 
 
 class MovieProductionCountryLink(SQLModel, table=True):
     movie_id: int | None = Field(default=None, foreign_key="movie.id", primary_key=True)
     production_country_id: int | None = Field(
-        default=None, foreign_key="production_country.id", primary_key=True
+        default=None, foreign_key="productioncountry.id", primary_key=True
     )
 
 

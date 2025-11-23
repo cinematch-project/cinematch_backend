@@ -1,9 +1,14 @@
 from datetime import datetime
 from pathlib import Path
 import csv
-import slugify
 from sqlmodel import Session
-from app.db.helpers import parse_bool, parse_float, parse_int, parse_list_field
+from app.db.helpers import (
+    custom_slugify,
+    parse_bool,
+    parse_float,
+    parse_int,
+    parse_list_field,
+)
 from app.models.movie import (
     Genre,
     Keyword,
@@ -21,7 +26,7 @@ def populate_from_csv(session: Session, csv_path: str):
     if not Path(csv_path).exists():
         raise FileNotFoundError(f"CSV file not found at: {csv_path}")
 
-    current = 0
+    current_batch = 0
     ids = set()
     genre_cache = {}
     company_cache = {}
@@ -31,8 +36,7 @@ def populate_from_csv(session: Session, csv_path: str):
     with open(csv_path, encoding="utf-8") as f:
         reader = csv.DictReader(f)
 
-        for row in reader:
-            current += 1
+        for row_idx, row in enumerate(reader, start=1):
             tmdb_id = parse_int(row.get("id"))
             if tmdb_id in ids:
                 continue
@@ -42,7 +46,11 @@ def populate_from_csv(session: Session, csv_path: str):
                 vote_average=parse_float(row.get("vote_average")),
                 vote_count=parse_int(row.get("vote_count")),
                 status=row.get("status") or None,
-                release_date=row.get("release_date") or None,
+                release_date=(
+                    datetime.strptime(row["release_date"], "%Y-%m-%d").date()
+                    if row.get("release_date")
+                    else None
+                ),
                 revenue=parse_int(row.get("revenue")),
                 runtime=parse_int(row.get("runtime")),
                 adult=parse_bool(row.get("adult")),
@@ -65,8 +73,9 @@ def populate_from_csv(session: Session, csv_path: str):
             # ------------------------
             # Normalize Genres
             # ------------------------
+            movie_genres = set()
             for name in parse_list_field(row.get("genres")):
-                slug = slugify(name)
+                slug = custom_slugify(name)
                 genre = genre_cache.get(slug)
 
                 if not genre:
@@ -74,14 +83,18 @@ def populate_from_csv(session: Session, csv_path: str):
                     session.add(genre)
                     session.flush()
 
+                if slug not in movie_genres:
+                    session.add(MovieGenreLink(movie_id=movie.id, genre_id=genre.id))
+                    movie_genres.add(slug)
+
                 genre_cache[slug] = genre
-                session.add(MovieGenreLink(movie_id=movie.id, genre_id=genre.id))
 
             # ------------------------
             # Normalize Production Companies
             # ------------------------
+            movie_companies = set()
             for name in parse_list_field(row.get("production_companies")):
-                slug = slugify(name)
+                slug = custom_slugify(name)
                 company = company_cache.get(slug)
 
                 if not company:
@@ -89,19 +102,23 @@ def populate_from_csv(session: Session, csv_path: str):
                     session.add(company)
                     session.flush()
 
-                company_cache[slug] = company
-                session.add(
-                    MovieProductionCompanyLink(
-                        movie_id=movie.id,
-                        production_company_id=company.id,
+                if slug not in movie_companies:
+                    session.add(
+                        MovieProductionCompanyLink(
+                            movie_id=movie.id,
+                            production_company_id=company.id,
+                        )
                     )
-                )
+                    movie_companies.add(slug)
+
+                company_cache[slug] = company
 
             # ------------------------
             # Normalize Production Countries
             # ------------------------
+            movie_countries = set()
             for name in parse_list_field(row.get("production_countries")):
-                slug = slugify(name)
+                slug = custom_slugify(name)
                 country = country_cache.get(slug)
 
                 if not country:
@@ -109,19 +126,23 @@ def populate_from_csv(session: Session, csv_path: str):
                     session.add(country)
                     session.flush()
 
-                country_cache[slug] = country
-                session.add(
-                    MovieProductionCountryLink(
-                        movie_id=movie.id,
-                        production_country_id=country.id,
+                if slug not in movie_countries:
+                    session.add(
+                        MovieProductionCountryLink(
+                            movie_id=movie.id,
+                            production_country_id=country.id,
+                        )
                     )
-                )
+                    movie_countries.add(slug)
+
+                country_cache[slug] = country
 
             # ------------------------
             # Normalize Keywords
             # ------------------------
+            movie_keywords = set()
             for name in parse_list_field(row.get("keywords")):
-                slug = slugify(name)
+                slug = custom_slugify(name)
                 keyword = keyword_cache.get(slug)
 
                 if not keyword:
@@ -129,12 +150,19 @@ def populate_from_csv(session: Session, csv_path: str):
                     session.add(keyword)
                     session.flush()
 
-                keyword_cache[slug] = keyword
-                session.add(MovieKeywordLink(movie_id=movie.id, keyword_id=keyword.id))
+                if slug not in movie_keywords:
+                    session.add(
+                        MovieKeywordLink(movie_id=movie.id, keyword_id=keyword.id)
+                    )
+                    movie_keywords.add(slug)
 
-        current += 1
-        if current % 50000 == 0:
-            print(f"Processed {current} movies...")
+                keyword_cache[slug] = keyword
+
+            if row_idx % 500 == 0:
+                session.commit()
+                current_batch += 1
+                if current_batch % 10 == 0:
+                    print(f"Populated batch: {current_batch}")
 
     session.commit()
     print("Database populated (normalized)!")
