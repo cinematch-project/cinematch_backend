@@ -148,12 +148,18 @@ async def recommend_by_ids(
     """
     # run recommendation in a threadpool (CPU-bound / pandas / numpy)
     df_recs = await run_in_threadpool(
-        recommender.recommend, body.ids, body.top_n, body.similarity_weight
+        recommender.recommend,
+        body.ids,
+        body.top_n,
+        body.min_score,
+        body.similarity_weight,
     )
 
-    ids = [int(row["id"]) for _, row in df_recs.iterrows()]
+    rows = [row for _, row in df_recs.iterrows()]
+    ids = [int(row["id"]) for row in rows]
 
-    return get_movies_batch(session, ids)
+    movies = get_movies_batch(session, ids)
+    return movies
 
 
 @router.get("/filters", response_model=FilterResponse)

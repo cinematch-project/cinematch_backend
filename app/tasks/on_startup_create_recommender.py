@@ -6,11 +6,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 TARGET_DB_VERSION = 1
 MODEL_PATH = BASE_DIR / "data" / "recommender.joblib"
-MODEL_URL = "https://drive.google.com/uc?id=11VmHZVH4jaI9zYK-VrjszJztVRDBjJTz"
+MODEL_URL = ""
 
 
 def download_model():
-    print("Downloading model")
+    print("Downloading recommender model...")
     gdown.download(MODEL_URL, str(MODEL_PATH))
 
 
@@ -19,11 +19,9 @@ def on_startup_create_recommender(engine) -> MovieRecommender:
         download_model()
 
     if MODEL_PATH.exists():
-        print("Loading recommender from saved state...")
         recommender = MovieRecommender.load(MODEL_PATH)
         return recommender
 
-    print("Building recommender from database...")
     recommender = MovieRecommender(engine=engine)
     recommender.save(MODEL_PATH)
     return recommender
