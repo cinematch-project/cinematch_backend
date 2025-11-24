@@ -6,6 +6,7 @@ from datetime import datetime
 from sqlmodel import SQLModel, Session, select
 import kagglehub
 import os
+import shutil
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -22,7 +23,7 @@ def get_csv(csv_file: str):
     print(f"Downloading {DATASET_NAME} from Kaggle...")
     path = kagglehub.dataset_download("asaniczka/tmdb-movies-dataset-2023-930k-movies")
     print(f"Downloaded to {path}")
-    os.replace(os.path.join(path, DATASET_NAME), csv_file)
+    shutil.move(os.path.join(path, DATASET_NAME), csv_file)
     return csv_file
 
 
@@ -91,7 +92,8 @@ def on_startup_populate_db(db_file: str = DB_FILE, csv_file: str = CSV_FILE):
         try:
             csv = get_csv(csv_file)
             print("Populating Movie table from CSV:", csv)
-            populate_from_csv(engine, csv)
+            with Session(engine) as session:
+                populate_from_csv(session, csv)
             print("Population finished.")
         except Exception as e:
             print("Error populating DB from CSV:", e)

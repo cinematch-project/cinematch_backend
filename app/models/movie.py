@@ -1,40 +1,97 @@
-from typing import Optional
-from sqlmodel import SQLModel, Field
-from pydantic import BaseModel
+from datetime import date
+from typing import Optional, List
+from sqlmodel import Relationship, SQLModel, Field
 
 
-class RecommendMoviesRequest(BaseModel):
-    ids: list[int]
-    top_n: int | None = 10
-    similarity_weight: float | None = 0.7
+# ---------------------------
+# Link Tables
+# ---------------------------
 
 
-class MoviePublic(SQLModel):
-    id: int
-    tmdb_id: int
-    title: str
-    vote_average: float | None = None
-    release_date: str | None = None
-    overview: str | None = None
-    poster_path: str | None = None
-    genres: list[str] | None = None
+class MovieGenreLink(SQLModel, table=True):
+    movie_id: int | None = Field(default=None, foreign_key="movie.id", primary_key=True)
+    genre_id: int | None = Field(default=None, foreign_key="genre.id", primary_key=True)
+
+
+class MovieProductionCompanyLink(SQLModel, table=True):
+    movie_id: int | None = Field(default=None, foreign_key="movie.id", primary_key=True)
+    production_company_id: int | None = Field(
+        default=None, foreign_key="productioncompany.id", primary_key=True
+    )
+
+
+class MovieProductionCountryLink(SQLModel, table=True):
+    movie_id: int | None = Field(default=None, foreign_key="movie.id", primary_key=True)
+    production_country_id: int | None = Field(
+        default=None, foreign_key="productioncountry.id", primary_key=True
+    )
+
+
+class MovieKeywordLink(SQLModel, table=True):
+    movie_id: int | None = Field(default=None, foreign_key="movie.id", primary_key=True)
+    keyword_id: int | None = Field(
+        default=None, foreign_key="keyword.id", primary_key=True
+    )
+
+
+# ---------------------------
+# Normalized Tables
+# ---------------------------
+
+
+class Genre(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    slug: str = Field(unique=True)
+    name: str
+
+    movies: List["Movie"] = Relationship(
+        back_populates="genres", link_model=MovieGenreLink
+    )
+
+
+class ProductionCompany(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    slug: str = Field(unique=True)
+    name: str
+
+    movies: List["Movie"] = Relationship(
+        back_populates="production_companies", link_model=MovieProductionCompanyLink
+    )
+
+
+class ProductionCountry(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    slug: str = Field(unique=True)
+    name: str
+
+    movies: List["Movie"] = Relationship(
+        back_populates="production_countries", link_model=MovieProductionCountryLink
+    )
+
+
+class Keyword(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    slug: str = Field(unique=True)
+    name: str
+
+    movies: List["Movie"] = Relationship(
+        back_populates="keywords", link_model=MovieKeywordLink
+    )
+
+
+# ---------------------------
+# Movie Table
+# ---------------------------
 
 
 class Movie(SQLModel, table=True):
-    """
-    Movie table reflecting the CSV columns.
-    Some multi-value fields are stored as JSON strings (genres, production_companies, etc.)
-    """
-
-    id: Optional[int] = Field(default=None, primary_key=True)  # auto-incrementing ID
-    tmdb_id: Optional[int] = None  # store the original TMDB dataset ID
+    id: Optional[int] = Field(default=None, primary_key=True)
+    tmdb_id: Optional[int] = None
     title: Optional[str] = None
     vote_average: Optional[float] = None
     vote_count: Optional[int] = None
     status: Optional[str] = None
-    release_date: Optional[str] = (
-        None  # original CSV has string dates; keep as str for simplicity
-    )
+    release_date: Optional[date] = None
     revenue: Optional[int] = None
     runtime: Optional[int] = None
     adult: Optional[bool] = None
@@ -48,31 +105,19 @@ class Movie(SQLModel, table=True):
     popularity: Optional[float] = None
     poster_path: Optional[str] = None
     tagline: Optional[str] = None
-    # store multi-value fields as JSON text
-    genres: Optional[str] = None
-    production_companies: Optional[str] = None
-    production_countries: Optional[str] = None
-    spoken_languages: Optional[str] = None
-    # keywords: CSV comment asked to split by ", " -> store JSON list
-    keywords: Optional[str] = None
 
-    def to_public(self) -> MoviePublic:
-        genres_list = (
-            [
-                g.strip().strip('"').strip("'")
-                for g in self.genres.strip("[").strip("]").split(", ")
-                if g.strip()
-            ]
-            if self.genres
-            else []
-        )
-        return MoviePublic(
-            id=self.id,
-            tmdb_id=self.tmdb_id,
-            title=self.title,
-            vote_average=self.vote_average,
-            release_date=self.release_date,
-            overview=self.overview,
-            poster_path=self.poster_path,
-            genres=genres_list,
-        )
+    genres: List[Genre] = Relationship(
+        back_populates="movies", link_model=MovieGenreLink
+    )
+
+    production_companies: List[ProductionCompany] = Relationship(
+        back_populates="movies", link_model=MovieProductionCompanyLink
+    )
+
+    production_countries: List[ProductionCountry] = Relationship(
+        back_populates="movies", link_model=MovieProductionCountryLink
+    )
+
+    keywords: List[Keyword] = Relationship(
+        back_populates="movies", link_model=MovieKeywordLink
+    )
