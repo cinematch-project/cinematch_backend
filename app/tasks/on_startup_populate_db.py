@@ -7,6 +7,7 @@ from sqlmodel import SQLModel, Session, select
 import kagglehub
 import os
 import shutil
+import gdown
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -15,6 +16,7 @@ DATA_DIR = BASE_DIR / "data"
 DB_FILE = DATA_DIR / "movies.db"
 DATASET_NAME = "TMDB_movie_dataset_v11.csv"
 CSV_FILE = DATA_DIR / DATASET_NAME
+DB_URL = "https://drive.google.com/uc?id=17QCmQPW84sM4bgo6TFoSyhV0OkaaHk2C"
 
 
 def get_csv(csv_file: str):
@@ -25,6 +27,14 @@ def get_csv(csv_file: str):
     print(f"Downloaded to {path}")
     shutil.move(os.path.join(path, DATASET_NAME), csv_file)
     return csv_file
+
+
+def get_database():
+    if Path(DB_FILE).exists():
+        return DB_FILE
+    print(f"Downloading db from Google Drive...")
+    gdown.download(DB_URL, str(DB_FILE))
+    return DB_FILE
 
 
 def on_startup_populate_db(db_file: str = DB_FILE, csv_file: str = CSV_FILE):
@@ -77,6 +87,9 @@ def on_startup_populate_db(db_file: str = DB_FILE, csv_file: str = CSV_FILE):
             db_needs_setup = True
 
     if db_needs_setup:
+        if not DB_FILE.exists() and DB_URL:
+            get_database()
+            return engine
         # If tables exist and we are reinitializing, drop all to ensure clean schema
         try:
             print("Dropping existing tables (if any) and creating fresh schema...")
