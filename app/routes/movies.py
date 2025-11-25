@@ -9,6 +9,7 @@ from app.models.dto import (
     MoviePublic,
     MovieSearchResponse,
     RecommendMoviesRequest,
+    RecommenderScore,
 )
 from app.models.movie import (
     Genre,
@@ -112,6 +113,32 @@ def get_movies(
     return MovieSearchResponse(items=results, totalPages=total_pages)
 
 
+def get_movies_by_ids(ids: list[str], session: SessionDep):
+    if not ids:
+        return []
+
+    ordered_ids = list(set(ids))
+
+    stmt = select(Movie).where(Movie.id.in_(ordered_ids))
+    results = session.exec(stmt).unique().all()
+
+    by_id = {m.id: m for m in results}
+    response: list[MoviePublic] = []
+    for _id in ids:
+        movie = by_id.get(_id)
+        if movie:
+            response.append(
+                MoviePublic(
+                    **movie.model_dump(),
+                    genres=movie.genres,
+                    keywords=movie.keywords,
+                    production_companies=movie.production_companies,
+                    production_countries=movie.production_countries,
+                )
+            )
+    return response
+
+
 @router.get("/batch")
 def get_movies_batch(
     session: SessionDep,
@@ -120,21 +147,7 @@ def get_movies_batch(
     """
     Get movies by ID
     """
-    if not ids:
-        return []
-
-    ordered_ids = list(set(ids))
-
-    stmt = select(Movie).where(Movie.id.in_(ordered_ids))
-    results: list[Movie] = session.exec(stmt).all()
-
-    by_id = {m.id: m for m in results}
-    response: list[MoviePublic] = []
-    for _id in ids:
-        movie = by_id.get(_id)
-        if movie:
-            response.append(movie)
-    return response
+    return get_movies_by_ids(ids, session)
 
 
 @router.post("/recommend")
@@ -147,13 +160,28 @@ async def recommend_by_ids(
     Get recommended movies
     """
     # run recommendation in a threadpool (CPU-bound / pandas / numpy)
-    df_recs = await run_in_threadpool(
-        recommender.recommend, body.ids, body.top_n, body.similarity_weight
+    rows = await run_in_threadpool(
+        recommender.recommend,
+        body.ids,
+        body.top_n,
+        body.min_score,
+        body.similarity_weight,
     )
 
-    ids = [int(row["id"]) for _, row in df_recs.iterrows()]
+    ids = [int(row["id"]) for row in rows]
 
-    return get_movies_batch(session, ids)
+    movies = get_movies_by_ids(ids, session)
+
+    return [
+        MoviePublic(
+            **m.model_dump(exclude="score_overview"),
+            score_overview=RecommenderScore(
+                column_contribution=rows[i]["column_contribution"],
+                relevance_score=rows[i]["relevance_score"],
+            ),
+        )
+        for i, m in enumerate(movies)
+    ]
 
 
 @router.get("/filters", response_model=FilterResponse)

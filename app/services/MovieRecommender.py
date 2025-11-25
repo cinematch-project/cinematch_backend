@@ -1,245 +1,258 @@
-import time
-import ast
-import re
+from pathlib import Path
 import pandas as pd
 import numpy as np
 import joblib
-from pathlib import Path
-from typing import Optional, List
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import linear_kernel
+from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.preprocessing import MinMaxScaler
 
-from app.db.helpers import get_sql_statement
+from app.models.dto import RecommenderMovie
 
 
 class MovieRecommender:
-    def __init__(
-        self,
-        df: Optional[pd.DataFrame] = None,
-        csv_path: Optional[str] = None,
-        engine=None,
-    ):
-        print("Initializing MovieRecommender...")
-        start_load = time.time()
-        if df is not None:
-            self.df = df.copy()
-        elif engine is not None:
-            sql = get_sql_statement()
-            self.df = pd.read_sql_query(sql, con=engine)
-        elif csv_path is not None:
-            self.df = pd.read_csv(csv_path)
+    default_weights = {"overview": 0.2, "genres": 0.4, "keywords": 0.4}
+
+    def __init__(self, engine):
+        print("Creating MovieRecommender...")
+        self.df = None
+        self.matrices = {}
+        self.vectorizers = {}
+        self.scaler = MinMaxScaler()
+        self.C = None
+        self.m = None
+
+        if engine:
+            print("Found engine")
+            self._load_data(engine)
+            self._calculate_popularity()
+            self._build_models()
+            print("✅ Recommender ready")
         else:
-            raise ValueError("Provide df, csv_path, or engine to MovieRecommender")
+            raise Exception("No database engine provided.")
 
-        print(
-            f"Loaded data (in {time.time() - start_load:.2f}s) - rows: {len(self.df)}"
-        )
-        self._prepare_data()
-        self._calculate_popularity()
-        self._create_soup()
-        self._vectorize()
+    def _load_data(self, engine):
+        print("Loading data from engine...", end=" ", flush=True)
+        # Added vote_average and vote_count for popularity calc
+        query = """
+            SELECT
+                m.id,
+                m.title,
+                m.overview,
+                m.vote_average,
+                m.vote_count,
+                (SELECT GROUP_CONCAT(g.name, ', ')
+                 FROM genre g
+                 JOIN moviegenrelink l ON l.genre_id = g.id
+                 WHERE l.movie_id = m.id) AS genres,
+                (SELECT GROUP_CONCAT(k.name, ', ')
+                 FROM keyword k
+                 JOIN moviekeywordlink l ON l.keyword_id = k.id
+                 WHERE l.movie_id = m.id) AS keywords
+            FROM movie m
+        """
+        self.df = pd.read_sql(query, engine)
 
-        self.id_to_index = pd.Series(
-            self.df.index.values, index=self.df["id"].astype(str)
-        ).to_dict()
-        print("MovieRecommender ready.")
-
-    @staticmethod
-    def _extract_names(x):
-        if pd.isna(x) or x == "":
-            return ""
-        try:
-            parsed = ast.literal_eval(x)
-            if isinstance(parsed, list):
-                if all(isinstance(elem, dict) for elem in parsed):
-                    names = [
-                        d.get("name")
-                        for d in parsed
-                        if isinstance(d, dict) and "name" in d
-                    ]
-                    return " ".join([str(n) for n in names if n])
-                return " ".join([str(elem) for elem in parsed if elem])
-            if isinstance(parsed, dict):
-                return " ".join(
-                    [str(v) for v in parsed.values() if isinstance(v, (str, int))]
-                )
-        except Exception:
-            pass
-        cleaned_str = re.sub(r'[\[\]{}"\\,\'`]', " ", str(x))
-        return cleaned_str
-
-    def _prepare_data(self):
-        self.df = self.df.drop_duplicates().reset_index(drop=True)
-        keep_cols = [
-            "id",
-            "tmdb_id",
-            "title",
-            "original_title",
-            "overview",
-            "genres",
-            "keywords",
-            "cast",
-            "crew",
-            "release_date",
-            "runtime",
-            "vote_average",
-            "vote_count",
-            "popularity",
-            "poster_path",
-        ]
-        for c in keep_cols:
-            if c not in self.df.columns:
-                self.df[c] = ""
-        for c in ["title", "overview", "genres", "keywords", "cast", "crew"]:
-            self.df[c] = self.df[c].fillna("").astype(str)
-        for c in ["vote_average", "vote_count", "popularity", "runtime"]:
-            self.df[c] = pd.to_numeric(self.df[c], errors="coerce").fillna(0)
+        # Clean data
+        self.df["overview"] = self.df["overview"].fillna("")
+        self.df["genres"] = self.df["genres"].fillna("")
+        self.df["keywords"] = self.df["keywords"].fillna("")
+        print("✅")
 
     def _calculate_popularity(self):
-        C = self.df["vote_average"].mean()
-        m = self.df["vote_count"].quantile(0.95)
-        self.C = C
-        self.m = m
+        """
+        Calculates IMDB-style Weighted Rating and normalizes it 0-1.
+        """
+        print("Calculating IMDB-style Weighted Rating...", end=" ", flush=True)
+        # C is the mean vote across the whole report
+        self.C = self.df["vote_average"].mean()
+        # m is the minimum votes required to be listed (95th percentile)
+        self.m = self.df["vote_count"].quantile(0.95)
+
+        # Calculate Weighted Rating
         self.df["weighted_rating"] = self.df.apply(self._weighted_rating, axis=1)
-        scaler = MinMaxScaler()
-        self.df["wr_normalized"] = scaler.fit_transform(self.df[["weighted_rating"]])
 
-    def _create_soup(self):
-        for c in ["genres", "keywords", "cast", "crew"]:
-            self.df[c + "_clean"] = self.df[c].apply(self._extract_names)
-        self.df["soup"] = self.df.apply(
-            lambda r: " ".join(
-                [
-                    str(r.get(col, ""))
-                    for col in (
-                        "overview",
-                        "genres_clean",
-                        "keywords_clean",
-                        "cast_clean",
-                        "crew_clean",
-                    )
-                    if r.get(col)
-                ]
-            ),
-            axis=1,
+        # Normalize to 0-1 scale so it matches Cosine Similarity scale
+        self.df["wr_normalized"] = self.scaler.fit_transform(
+            self.df[["weighted_rating"]]
         )
-
-    def _vectorize(self):
-        print("Starting TF-IDF vectorization (this may take a while)...")
-        start_tfidf = time.time()
-        tfidf = TfidfVectorizer(stop_words="english", max_features=50000)
-        self.tfidf_matrix = tfidf.fit_transform(self.df["soup"].fillna(""))
-        print(
-            f" TF-IDF matrix created. Shape: {self.tfidf_matrix.shape} (In {time.time() - start_tfidf:.2f} sec)"
-        )
+        print("✅")
 
     def _weighted_rating(self, x):
-        v = x["vote_count"] if "vote_count" in x else 0
-        R = x["vote_average"] if "vote_average" in x else 0
-        if v is None or R is None:
-            return 0.0
-        return (v / (v + self.m)) * R + (self.m / (v + self.m)) * self.C
+        v = x["vote_count"]
+        R = x["vote_average"]
+        # Avoid division by zero or empty data
+        if v == 0:
+            return 0
+        return (v / (v + self.m) * R) + (self.m / (v + self.m) * self.C)
 
-    def _get_indices_from_ids(self, ids: List[int]) -> List[int]:
+    def _tokenize_tags(self, text):
         """
-        Convert a list of ids to DataFrame integer indices.
-        Returns a list of unique indices in the same input order (deduped).
+        Turns 'Science Fiction, New York' into 'Science_Fiction New_York'.
+        This preserves multi-word tags without needing prefixes.
         """
-        if not ids:
+        if not text:
+            return ""
+        # Split by comma, strip whitespace, replace internal spaces with underscore
+        tags = [t.strip().replace(" ", "_").lower() for t in text.split(",")]
+        return " ".join(tags)
+
+    def _build_models(self):
+        print("Building Multi-Vector TF-IDF models...", end=" ", flush=True)
+
+        # 1. Overview Vectorizer (Standard English text)
+        self.vectorizers["overview"] = TfidfVectorizer(
+            stop_words="english", max_features=30000
+        )
+        self.matrices["overview"] = self.vectorizers["overview"].fit_transform(
+            self.df["overview"]
+        )
+
+        # 2. Genres Vectorizer (Tags)
+        # Pre-process to lock multi-word genres
+        genre_soup = self.df["genres"].apply(self._tokenize_tags)
+        self.vectorizers["genres"] = TfidfVectorizer(
+            token_pattern=r"(?u)\b[\w-]+\b", max_features=30000
+        )
+        self.matrices["genres"] = self.vectorizers["genres"].fit_transform(genre_soup)
+
+        # 3. Keywords Vectorizer (Tags)
+        keyword_soup = self.df["keywords"].apply(self._tokenize_tags)
+        self.vectorizers["keywords"] = TfidfVectorizer(
+            token_pattern=r"(?u)\b[\w-]+\b", max_features=30000
+        )
+        self.matrices["keywords"] = self.vectorizers["keywords"].fit_transform(
+            keyword_soup
+        )
+
+        print("✅")
+
+    def recommend(
+        self, movie_ids, top_n=20, min_score=0.1, similarity_weight=0.8, weights=None
+    ) -> list[RecommenderMovie]:
+        """
+        Complex recommendation combining 3 content vectors + popularity.
+
+        Args:
+            weights (dict): Weights for overview, genres, keywords (sum should ideally be 1.0)
+            similarity_weight (float): Balance between Content (0.8) and Popularity (0.2)
+        """
+        if self.df is None:
+            raise Exception("Model not loaded.")
+
+        if weights is None:
+            weights = self.default_weights
+
+        popularity_weight = 1.0 - similarity_weight
+
+        # 1. Get Input Indices
+        input_indices = self.df[self.df["id"].isin(movie_ids)].index.tolist()
+        if not input_indices:
             return []
-        indices = []
-        seen = set()
-        for raw in ids:
-            if raw is None:
+
+        # 2. Calculate Cosine Similarity for each column independently
+        # We calculate the mean vector of the input movies for each category
+        sim_scores = {}
+
+        for col in ["overview", "genres", "keywords"]:
+            matrix = self.matrices[col]
+            # Get vectors for input movies
+            input_vectors = matrix[input_indices]
+            # Average them to get user profile
+            user_profile = np.asarray(np.mean(input_vectors, axis=0))
+            # Calculate cosine similarity (flatten to 1D array)
+            sim_scores[col] = cosine_similarity(user_profile, matrix).flatten()
+
+        # 3. Get Popularity Scores
+        pop_scores = self.df["wr_normalized"].values
+
+        # 4. Combine Scores & Calculate Contributions
+        results = []
+
+        # Iterate through all movies to calculate final weighted score
+        # Note: Vectorizing this math is faster, but loop is clearer for contribution logic
+
+        total_content_scores = (
+            sim_scores["overview"] * weights.get("overview", 0)
+            + sim_scores["genres"] * weights.get("genres", 0)
+            + sim_scores["keywords"] * weights.get("keywords", 0)
+        )
+
+        final_scores = (total_content_scores * similarity_weight) + (
+            pop_scores * popularity_weight
+        )
+
+        # Create candidate list
+        candidates = []
+        for idx, score in enumerate(final_scores):
+            if idx in input_indices:
+                continue  # Skip inputs
+            if score < min_score:
                 continue
-            key = str(raw)
-            idx = self.id_to_index.get(key)
-            if idx is not None and idx not in seen:
-                indices.append(int(idx))
-                seen.add(int(idx))
-        return indices
+
+            candidates.append((idx, score))
+
+        # Sort by final score
+        candidates = sorted(candidates, key=lambda x: x[1], reverse=True)[:top_n]
+
+        # 5. Format Output with Contribution percentages
+        for idx, final_score in candidates:
+
+            # Retrieve raw similarity components
+            s_ov = sim_scores["overview"][idx]
+            s_ge = sim_scores["genres"][idx]
+            s_kw = sim_scores["keywords"][idx]
+            s_pop = pop_scores[idx]
+
+            # Calculate weighted contribution parts
+            c_ov = s_ov * weights.get("overview", 0) * similarity_weight
+            c_ge = s_ge * weights.get("genres", 0) * similarity_weight
+            c_kw = s_kw * weights.get("keywords", 0) * similarity_weight
+            c_pop = s_pop * popularity_weight
+
+            # Avoid division by zero
+            safe_divisor = final_score if final_score > 0 else 1.0
+
+            contributions = {
+                "overview": round((c_ov / safe_divisor) * 100, 2),
+                "genres": round((c_ge / safe_divisor) * 100, 2),
+                "keywords": round((c_kw / safe_divisor) * 100, 2),
+                "popularity": round((c_pop / safe_divisor) * 100, 2),
+            }
+
+            results.append(
+                {
+                    "id": int(self.df.iloc[idx]["id"]),
+                    "relevance_score": round(float(final_score), 4),
+                    "column_contribution": contributions,
+                }
+            )
+
+        return results
 
     def save(self, path: str | Path):
-        """
-        Save the recommender's essential state (DataFrame, TF-IDF matrix, and parameters)
-        to a .joblib file.
-        """
-        path = Path(path)
-        state = {
+        model_data = {
             "df": self.df,
-            "tfidf_matrix": self.tfidf_matrix,
+            "matrices": self.matrices,
+            "vectorizers": self.vectorizers,
+            "scaler": self.scaler,
             "C": self.C,
             "m": self.m,
         }
-        joblib.dump(state, path)
+        path = Path(path)
+        joblib.dump(model_data, path)
         print(f"✅ Recommender saved to {path}")
 
     @classmethod
-    def load(cls, path: str | Path) -> "MovieRecommender":
-        """
-        Load a recommender previously saved with .save().
-        Returns a fully usable MovieRecommender instance.
-        """
+    def load(cls, path: str | Path):
         path = Path(path)
-        state = joblib.load(path)
-        obj = cls.__new__(cls)  # bypass __init__
-        obj.df = state["df"]
-        obj.tfidf_matrix = state["tfidf_matrix"]
-        obj.C = state["C"]
-        obj.m = state["m"]
-
-        # rebuild mappings for id/title lookup
-        obj.tmdb_to_index = pd.Series(
-            obj.df.index.values, index=obj.df["tmdb_id"].astype(str)
-        ).to_dict()
-        obj.id_to_index = pd.Series(
-            obj.df.index.values, index=obj.df["id"].astype(str)
-        ).to_dict()
-        if "title" in obj.df.columns:
-            obj.title_to_index = pd.Series(
-                obj.df.index, index=obj.df["title"].str.lower()
-            ).to_dict()
-        else:
-            obj.title_to_index = {}
-
-        print(f"✅ Recommender loaded from {path} (rows={len(obj.df)})")
-        return obj
-
-    def recommend(
-        self, ids: List[int], top_n: int = 10, similarity_weight: float = 0.7
-    ):
-        """
-        Recommend movies based on a list of input IDs.
-        Returns a pandas.DataFrame of recommended rows (top_n).
-        """
-        input_indices = self._get_indices_from_ids(ids)
-        if not input_indices:
-            return self.df.iloc[[]].copy()
-
-        # build mean vector from input indices
-        selected_vectors = self.tfidf_matrix[input_indices]
-        mean_vector = selected_vectors.mean(axis=0)  # sparse matrix
-        # convert to array for linear_kernel
-        mean_vector_array = np.asarray(mean_vector)
-        sim_scores = linear_kernel(mean_vector_array, self.tfidf_matrix).flatten()
-
-        pop_scores = self.df["wr_normalized"].values
-        if len(sim_scores) != len(pop_scores):
-            pop_scores = np.zeros_like(sim_scores)
-
-        popularity_weight = 1.0 - similarity_weight
-        final_scores = (similarity_weight * sim_scores) + (
-            popularity_weight * pop_scores
-        )
-
-        all_sorted_indices = final_scores.argsort()[::-1]
-        recommended_indices = []
-        input_set = set(input_indices)
-        for idx in all_sorted_indices:
-            if idx not in input_set:
-                recommended_indices.append(int(idx))
-            if len(recommended_indices) >= top_n:
-                break
-
-        return self.df.iloc[recommended_indices].copy()
+        print(f"Loading model from {path}...")
+        data = joblib.load(path)
+        rec = cls.__new__(cls)  # bypass __init__
+        rec.df = data["df"]
+        rec.matrices = data["matrices"]
+        rec.vectorizers = data["vectorizers"]
+        rec.scaler = data["scaler"]
+        rec.C = data["C"]
+        rec.m = data["m"]
+        print(f"✅ Recommender loaded from {path} (rows={len(rec.df)})")
+        return rec

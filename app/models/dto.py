@@ -7,24 +7,35 @@ from app.models.movie import Genre, Keyword, ProductionCompany, ProductionCountr
 
 class RecommendMoviesRequest(BaseModel):
     ids: list[int]
-    top_n: int | None = 10
-    similarity_weight: float | None = 0.7
+    top_n: int | None = 20
+    min_score: int | None = 0.1
+    similarity_weight: float | None = 0.8
+
+
+class RecommenderScore(BaseModel):
+    relevance_score: float
+    column_contribution: dict[str, float]
+
+
+class RecommenderMovie(RecommenderScore):
+    id: int
 
 
 class MoviePublic(SQLModel):
     id: int
     tmdb_id: int
     title: str
-    genres: list[Genre]
-    production_companies: list[ProductionCompany]
-    production_countries: list[ProductionCountry]
-    keywords: list[Keyword]
+    genres: list[Genre] = []
+    production_companies: list[ProductionCompany] = []
+    production_countries: list[ProductionCountry] = []
+    keywords: list[Keyword] = []
     original_title: str | None = None
     vote_average: float | None = None
     release_date: date | None = None
     overview: str | None = None
     poster_path: str | None = None
     runtime: int | None = None
+    score_overview: RecommenderScore | None = None
 
 
 class MovieSearchResponse(BaseModel):

@@ -32,7 +32,7 @@ def get_csv(csv_file: str):
 def get_database():
     if Path(DB_FILE).exists():
         return DB_FILE
-    print(f"Downloading db from Google Drive...")
+    print("Downloading db from Google Drive...")
     gdown.download(DB_URL, str(DB_FILE))
     return DB_FILE
 
