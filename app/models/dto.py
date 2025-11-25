@@ -25,10 +25,10 @@ class MoviePublic(SQLModel):
     id: int
     tmdb_id: int
     title: str
-    genres: list[Genre]
-    production_companies: list[ProductionCompany]
-    production_countries: list[ProductionCountry]
-    keywords: list[Keyword]
+    genres: list[Genre] = []
+    production_companies: list[ProductionCompany] = []
+    production_countries: list[ProductionCountry] = []
+    keywords: list[Keyword] = []
     original_title: str | None = None
     vote_average: float | None = None
     release_date: date | None = None

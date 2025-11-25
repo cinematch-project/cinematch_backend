@@ -6,7 +6,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 TARGET_DB_VERSION = 1
 MODEL_PATH = BASE_DIR / "data" / "recommender.joblib"
-MODEL_URL = ""
+MODEL_URL = "https://drive.google.com/uc?id=1A4VHJx5YxvEyepuQMSK_9cYDDRY-pI8r"
 
 
 def download_model():

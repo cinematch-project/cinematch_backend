@@ -10,6 +10,8 @@ from app.models.dto import RecommenderMovie
 
 
 class MovieRecommender:
+    default_weights = {"overview": 0.2, "genres": 0.4, "keywords": 0.4}
+
     def __init__(self, engine):
         print("Creating MovieRecommender...")
         self.df = None
@@ -18,9 +20,6 @@ class MovieRecommender:
         self.scaler = MinMaxScaler()
         self.C = None
         self.m = None
-
-        # Default weights if none provided
-        self.default_weights = {"overview": 0.2, "genres": 0.4, "keywords": 0.4}
 
         if engine:
             print("Found engine")
